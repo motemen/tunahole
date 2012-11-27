@@ -8,76 +8,90 @@ var config = process.argv[2].split(/:/),
     listenPort = config[1],
     domainRe   = new RegExp('^(.+?)\\.' + baseDomain.replace(/\W/g, '\\$&') + '$');
 
-var entries = {};
+function Connection (name, socket) {
+    this.name   = name;
+    this.socket = socket;
+}
 
-var baseApp = express();
+Connection.register = function (name, socket) {
+    return Connection.all[name] = new Connection(name, socket);
+};
 
-baseApp.use(express.bodyParser());
+Connection.all = {};
 
-baseApp.get ('/', function (req, res) {
+var subapp = {};
+
+subapp.manager = express();
+
+subapp.manager.use(express.bodyParser());
+
+subapp.manager.get ('/', function (req, res) {
     res.send('tunahole');
 });
 
-baseApp.post('/', function (req, res) {
+subapp.manager.post('/', function (req, res) {
     var name = req.param('name');
-    var socket = io
-        .of('/-/' + name)
-        .on('connection', function (socket) {
-            socket.on('response.header', function (data) {
-                var res = entries[name].responses[data.id];
-                res.writeHead(data.statusCode, data.headers);
-            });
-            socket.on('response.body', function (data) {
-                var res = entries[name].responses[data.id];
-                var buffer = new Buffer(data.body, 'base64');
-                res.write(buffer);
-            });
-            socket.on('response.end', function (data) {
-                var res = entries[name].responses[data.id];
-                res.end();
-            });
-        })
-    entries[name] = {
-        socket: socket,
-        responses: {}
-    };
-    res.send(201)
+
+    io.of('/-/' + name).on('connection', function (socket) {
+        // TODO accept only one connection
+        Connection.register(name, socket);
+    });
+    // TODO unregister
+
+    res.send(201);
 });
 
-var tunnelApp = function (name, req, res) {
-    var entry = entries[name];
-    if (!entry) {
+subapp.tunnel = function (name, req, res) {
+    var connection = Connection.all[name];
+    if (!connection) {
         res.send(404);
         return;
     }
 
-    function genId () { return Math.random().toString(36).substring(2) }
+    var id = Math.random().toString(36).substring(2);
 
-    var id = genId();
-    entry.responses[id] = res;
-    entry.socket.emit('request.header', {
+    connection.socket.emit('request.header', {
         id: id,
         url: req.url,
         method: req.method,
         headers: req.headers
     });
+
     req.on('data', function (chunk) {
-        entry.socket.emit('request.body', {
+        connection.socket.emit('request.body', {
             id: id,
             body: chunk.toString('base64')
         });
     });
-    req.on('end', function () { entry.socket.emit('request.end', { id: id }) });
+
+    req.on('end', function () {
+        connection.socket.emit('request.end', { id: id })
+    });
+
+    connection.socket.on('response.header', function (data) {
+        if (data.id !== id) return;
+
+        res.writeHead(data.statusCode, data.headers);
+
+        connection.socket.on('response.body', function (data) {
+            var buffer = new Buffer(data.body, 'base64');
+            res.write(buffer);
+        });
+
+        connection.socket.on('response.end', function (data) {
+            res.end();
+        });
+    });
 };
 
 app.use(function (req, res, next) {
     if (req.host === baseDomain) {
-        return baseApp(req, res, next);
+        return subapp.manager(req, res, next);
     }
 
     var m = domainRe.exec(req.host);
     if (m) {
-        return tunnelApp(m[1], req, res);
+        return subapp.tunnel(m[1], req, res);
     }
 
     console.log('Could not handle host:', req.host);

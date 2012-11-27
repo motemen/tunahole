@@ -7,7 +7,7 @@ var config = process.argv[2].split(/:/),
     remoteHost = config[2],
     remotePort = config[3] || 80;
 
-var req = http.request({
+var registerReq = http.request({
     host: remoteHost,
     port: remotePort,
     path: '/',
@@ -22,38 +22,49 @@ var req = http.request({
         console.log('tunnel opened at http://' + name + '.' + remoteHost + ':' + remotePort);
     });
 
-    var reqs = {};
     socket.on('request.header', function (data) {
         delete data.headers.connection;
         // TODO drop other headers
 
-        reqs[data.id] = http.request({
+        var id = data.id;
+        var req = http.request({
             host: 'localhost',
-            port: 5004,
+            port: localPort,
             path: data.url,
             method: data.method,
             headers: data.headers
         }, function (res) {
-            socket.emit('response.header', { id: data.id, statusCode: res.statusCode, headers: res.headers });
-            res.on('data', function (chunk) {
-                socket.emit('response.body', { id: data.id, body: chunk.toString('base64') });
+            socket.emit('response.header', {
+                id: id,
+                statusCode: res.statusCode,
+                headers: res.headers
             });
-            res.on('end',  function () { socket.emit('response.end', { id: data.id }) });
+
+            res.on('data', function (chunk) {
+                socket.emit('response.body', {
+                    id: id,
+                    body: chunk.toString('base64')
+                });
+            });
+
+            res.on('end', function () {
+                socket.emit('response.end', { id: id })
+            });
         });
-    });
 
-    socket.on('request.body', function (data) {
-        var buffer = new Buffer(data.body, 'base64');
-        reqs[data.id].write(buffer);
-    });
+        socket.on('request.body', function (data) {
+            var buffer = new Buffer(data.body, 'base64');
+            req.write(buffer);
+        });
 
-    socket.on('request.end', function (d) {
-        reqs[d.id].end()
+        socket.on('request.end', function (d) {
+            req.end();
+        });
     });
 });
 
-req.write('name=' + encodeURIComponent(name));
-req.end();
+registerReq.write('name=' + encodeURIComponent(name));
+registerReq.end();
 
 /**
  * node tuna-client hoge:9999:local.hatena.com:8877
