@@ -20,7 +20,7 @@ var registerReq = http.request({
     var socket = io.connect('http://' + remoteHost + ':' + remotePort + '/-/' + name);
 
     socket.on('connect', function () {
-        console.log('tunnel opened at http://' + name + '.' + remoteHost + ':' + remotePort);
+        console.log('tunnel opened at ' + res.headers['location']);
     });
 
     socket.on('request.header', function (data) {
