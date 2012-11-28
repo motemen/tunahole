@@ -1,7 +1,8 @@
 var express = require('express'),
     app     = express(),
     server  = require('http').createServer(app),
-    io      = require('socket.io').listen(server);
+    io      = require('socket.io').listen(server),
+    util    = require('./util');
 
 var config = process.argv[2].split(/:/),
     baseDomain = config[0],
@@ -49,38 +50,23 @@ subapp.tunnel = function (name, req, res) {
     }
 
     var id = Math.random().toString(36).substring(2);
+    var socket = connection.socket;
 
-    connection.socket.emit('request.header', {
+    socket.emit('request.header', {
         id: id,
         url: req.url,
         method: req.method,
         headers: req.headers
     });
 
-    req.on('data', function (chunk) {
-        connection.socket.emit('request.body', {
-            id: id,
-            body: chunk.toString('base64')
-        });
-    });
+    req.pipe(util.toWritableStream(socket, 'request', id));
 
-    req.on('end', function () {
-        connection.socket.emit('request.end', { id: id })
-    });
-
-    connection.socket.on('response.header', function (data) {
+    socket.on('response.header', function (data) {
         if (data.id !== id) return;
 
         res.writeHead(data.statusCode, data.headers);
 
-        connection.socket.on('response.body', function (data) {
-            var buffer = new Buffer(data.body, 'base64');
-            res.write(buffer);
-        });
-
-        connection.socket.on('response.end', function (data) {
-            res.end();
-        });
+        util.toReadableStream(socket, 'response', id).pipe(res);
     });
 };
 

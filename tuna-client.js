@@ -1,5 +1,6 @@
 var http = require('http'),
-    io   = require('socket.io-client');
+    io   = require('socket.io-client'),
+    util = require('./util');
 
 var config = process.argv[2].split(/:/),
     name       = config[0],
@@ -40,26 +41,10 @@ var registerReq = http.request({
                 headers: res.headers
             });
 
-            res.on('data', function (chunk) {
-                socket.emit('response.body', {
-                    id: id,
-                    body: chunk.toString('base64')
-                });
-            });
-
-            res.on('end', function () {
-                socket.emit('response.end', { id: id })
-            });
+            res.pipe(util.toWritableStream(socket, 'response', id));
         });
 
-        socket.on('request.body', function (data) {
-            var buffer = new Buffer(data.body, 'base64');
-            req.write(buffer);
-        });
-
-        socket.on('request.end', function (d) {
-            req.end();
-        });
+        util.toReadableStream(socket, 'request', id).pipe(req);
     });
 });
 
