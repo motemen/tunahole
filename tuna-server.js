@@ -7,7 +7,7 @@ var express = require('express'),
 var config = process.argv[2].split(/:/),
     baseDomain = config[0],
     listenPort = config[1],
-    domainRe   = new RegExp('^(.+?)\\.' + baseDomain.replace(/\W/g, '\\$&') + '$');
+    domainRe   = new RegExp(baseDomain.replace(/(\W)/g, function ($1) { return $1 === '*' ? '(.+?)' : '\\' + $1 }));
 
 function Connection (name, socket) {
     this.name   = name;
@@ -39,7 +39,8 @@ subapp.manager.post('/', function (req, res) {
     });
     // TODO unregister
 
-    res.send(201);
+    res.writeHead(201, { Location: baseDomain.replace(/\*/, name) });
+    res.end();
 });
 
 subapp.tunnel = function (name, req, res) {
@@ -71,17 +72,12 @@ subapp.tunnel = function (name, req, res) {
 };
 
 app.use(function (req, res, next) {
-    if (req.host === baseDomain) {
-        return subapp.manager(req, res, next);
-    }
-
     var m = domainRe.exec(req.host);
     if (m) {
         return subapp.tunnel(m[1], req, res);
     }
 
-    console.log('Could not handle host:', req.host);
-    return next();
+    return subapp.manager(req, res, next);
 });
 
 server.listen(listenPort);
