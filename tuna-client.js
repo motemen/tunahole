@@ -17,6 +17,15 @@ var registerReq = http.request({
         'content-type': 'application/x-www-form-urlencoded'
     }
 }, function (res) {
+    if (!(200 <= res.statusCode && res.statusCode < 300)) {
+        var body = ''
+        res.on('data', function (chunk) { body += chunk });
+        res.on('end',  function () {
+            console.log('Could not register: [' + res.statusCode + '] ' + body);
+        });
+        return;
+    }
+
     var socket = io.connect('http://' + remoteHost + ':' + remotePort + '/-/' + name);
 
     socket.on('connect', function () {

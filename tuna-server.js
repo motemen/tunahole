@@ -15,7 +15,19 @@ function Connection (name, socket) {
 }
 
 Connection.register = function (name, socket) {
+    if (Connection.hasOwnProperty(name)) {
+        throw 'Connection already exists: ' + name;
+    }
     return Connection.all[name] = new Connection(name, socket);
+};
+
+Connection.unregister = function (name) {
+    delete Connection.all[name];
+};
+
+Connection.get = function (name) {
+    if (!Connection.hasOwnProperty(name)) return;
+    return Connection.all[name];
 };
 
 Connection.all = {};
@@ -33,18 +45,24 @@ subapp.manager.get ('/', function (req, res) {
 subapp.manager.post('/', function (req, res) {
     var name = req.param('name');
 
-    io.of('/-/' + name).on('connection', function (socket) {
-        // TODO accept only one connection
-        Connection.register(name, socket);
-    });
-    // TODO unregister
+    if (Connection.get(name)) {
+        res.send(409);
+        return;
+    }
 
-    res.writeHead(201, { Location: baseDomain.replace(/\*/, name) });
+    io.of('/-/' + name).once('connection', function (socket) {
+        Connection.register(name, socket);
+        socket.on('disconnect', function () {
+            Connection.unregister(name);
+        });
+    });
+
+    res.writeHead(201, { Location: baseDomain.replace(/\*/, name) + ':' + listenPort });
     res.end();
 });
 
 subapp.tunnel = function (name, req, res) {
-    var connection = Connection.all[name];
+    var connection = Connection.get(name);
     if (!connection) {
         res.send(404);
         return;
